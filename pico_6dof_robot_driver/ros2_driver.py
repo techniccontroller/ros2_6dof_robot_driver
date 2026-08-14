@@ -268,9 +268,10 @@ class Pico6DOFDriver(Node):
                 f"{type(exc).__name__}: {exc}"
             )
 
-    def _gripper_norm_from_adapter(self, position_m: float) -> float:
-        # Match the common Robotiq adapter convention: 0.0 m closed, 0.085 m open.
-        return min(max(1.0 - float(position_m) / 0.085, 0.0), 1.0)
+    @staticmethod
+    def _gripper_norm_from_joint(position_rad: float) -> float:
+        """Convert the URDF gripper joint (0=closed, pi=open) to firmware units."""
+        return min(max(1.0 - float(position_rad) / math.pi, 0.0), 1.0)
 
     def _send_gripper(self, normalized: float) -> None:
         position = float(normalized)
@@ -280,6 +281,10 @@ class Pico6DOFDriver(Node):
             float(self._param("gripper_close_degrees")),
         )
         with self._command_lock:
+            if bool(self._param("debug_position_commands")):
+                self.get_logger().info(
+                    f"Sending gripper target: normalized={position:.3f}; Serial TX: {command}"
+                )
             self._require_robot().send(command)
         self._last_gripper_position = position
 
@@ -291,7 +296,7 @@ class Pico6DOFDriver(Node):
 
     def _on_gripper_adapter_topic(self, msg: GripperCommandMsg) -> None:
         try:
-            self._send_gripper(self._gripper_norm_from_adapter(msg.position))
+            self._send_gripper(self._gripper_norm_from_joint(msg.position))
         except Exception as exc:
             self.get_logger().error(f"Rejected adapter gripper command: {exc}")
 
@@ -301,7 +306,7 @@ class Pico6DOFDriver(Node):
     def _execute_gripper(self, goal_handle):
         result = GripperCommand.Result()
         try:
-            normalized = self._gripper_norm_from_adapter(goal_handle.request.command.position)
+            normalized = self._gripper_norm_from_joint(goal_handle.request.command.position)
             self._send_gripper(normalized)
             deadline = time.monotonic() + max(float(self._param("gripper_settle_time")), 0.0)
             while time.monotonic() < deadline:
@@ -379,6 +384,11 @@ class Pico6DOFDriver(Node):
                     speed = float(self._param("default_velocity"))
                 else:
                     speed = max(abs(a - b) for a, b in zip(target, previous_positions)) / segment_time
+                    # Time-parameterized trajectories decelerate to zero at
+                    # the final point. The physical robot can still have
+                    # tracking error there, so never leave the firmware trying
+                    # to close that error at an almost-zero speed.
+                    speed = max(speed, float(self._param("default_velocity")))
                 self._send_positions(target, speed, source="trajectory waypoint")
                 deadline = trajectory_start + target_time
                 while time.monotonic() < deadline:
@@ -400,6 +410,12 @@ class Pico6DOFDriver(Node):
             while final_target is not None:
                 telemetry, _ = self._require_robot().latest_telemetry()
                 if telemetry and max(abs(a - b) for a, b in zip(final_target, telemetry.positions_rad)) <= tolerance:
+                    max_error = max(
+                        abs(a - b) for a, b in zip(final_target, telemetry.positions_rad)
+                    )
+                    self.get_logger().info(
+                        f"Trajectory reached final point; max_error={math.degrees(max_error):.2f}deg"
+                    )
                     goal_handle.succeed()
                     result.error_code = FollowJointTrajectory.Result.SUCCESSFUL
                     result.error_string = "Trajectory reached final point"
@@ -418,7 +434,19 @@ class Pico6DOFDriver(Node):
 
             goal_handle.abort()
             result.error_code = FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED
-            result.error_string = "Robot did not reach final point within tolerance"
+            telemetry, _ = self._require_robot().latest_telemetry()
+            max_error = None
+            if telemetry is not None and final_target is not None:
+                max_error = max(
+                    abs(a - b) for a, b in zip(final_target, telemetry.positions_rad)
+                )
+            error_detail = (
+                f"; max_error={math.degrees(max_error):.2f}deg"
+                if max_error is not None
+                else "; no telemetry available"
+            )
+            result.error_string = "Robot did not reach final point within tolerance" + error_detail
+            self.get_logger().error(result.error_string)
         except ValueError as exc:
             goal_handle.abort()
             result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
@@ -496,7 +524,9 @@ def main(args=None) -> None:
     finally:
         executor.shutdown()
         node.destroy_node()
-        rclpy.shutdown()
+        # ROS signal handling may already have shut the context down.
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

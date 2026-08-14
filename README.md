@@ -61,7 +61,8 @@ Commands:
   `1.0` closed.
 - `robotiq_2f_urcap_adapter/gripper_command` action and
   `robotiq_2f_urcap_adapter/gripper_command_topic` for compatibility with the
-  reference driver. Adapter width is interpreted as 0.085 m open, 0 m closed.
+  MoveIt configuration. Its position uses the URDF `gripper_joint` convention:
+  0 rad closed and pi rad open.
 
 Services (`std_srvs/srv/Trigger`): `connect`, `disconnect`, `stop`, `home_j1`,
 `save_zeros`, and `load_zeros`. `stop` replaces the active target with the
