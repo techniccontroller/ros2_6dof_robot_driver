@@ -11,3 +11,4 @@ pico_6dof_driver:
     gripper_open_degrees: 10.0
     gripper_close_degrees: 170.0
     gripper_settle_time: 0.5
+    gripper_joint_name: gripper_joint

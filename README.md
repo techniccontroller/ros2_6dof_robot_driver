@@ -41,8 +41,10 @@ On connection the driver selects the firmware's `AUTO` mode; set
 
 Published:
 
-- `joint_states` (`sensor_msgs/msg/JointState`), six joint positions and
-  finite-difference velocities in radians and radians/second.
+- `joint_states` (`sensor_msgs/msg/JointState`), six measured arm positions
+  plus the last commanded `gripper_joint` position for RViz. Arm velocities
+  are finite differences in radians/second; gripper velocity is reported as
+  zero because the firmware has no gripper feedback.
 - `control_state` (`std_msgs/msg/String`), JSON connection/telemetry status.
 - `gripper_position` (`std_msgs/msg/Float64`), last commanded normalized value;
   the firmware does not report gripper feedback.

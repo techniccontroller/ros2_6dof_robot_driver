@@ -39,6 +39,9 @@ class Pico6DOFDriver(Node):
         self._joint_names = tuple(str(name) for name in self._param("joint_names"))
         if len(self._joint_names) != JOINT_COUNT or len(set(self._joint_names)) != JOINT_COUNT:
             raise ValueError("joint_names must contain six unique names")
+        self._gripper_joint_name = str(self._param("gripper_joint_name"))
+        if not self._gripper_joint_name or self._gripper_joint_name in self._joint_names:
+            raise ValueError("gripper_joint_name must be non-empty and distinct from arm joints")
 
         self._robot: SerialRobot | None = None
         self._connection_lock = threading.Lock()
@@ -113,6 +116,7 @@ class Pico6DOFDriver(Node):
         self.declare_parameter("gripper_open_degrees", 10.0)
         self.declare_parameter("gripper_close_degrees", 170.0)
         self.declare_parameter("gripper_settle_time", 0.5)
+        self.declare_parameter("gripper_joint_name", "gripper_joint")
 
     def _param(self, name: str):
         return self.get_parameter(name).value
@@ -447,9 +451,13 @@ class Pico6DOFDriver(Node):
 
         message = JointState()
         message.header.stamp = self.get_clock().now().to_msg()
-        message.name = list(self._joint_names)
-        message.position = list(telemetry.positions_rad)
-        message.velocity = velocities
+        message.name = [*self._joint_names, self._gripper_joint_name]
+        # The command interface uses 0=open and 1=closed. In the description,
+        # gripper_joint=pi opens the mimic fingers and gripper_joint=0 closes
+        # them. This is commanded state because firmware has no gripper sensor.
+        gripper_joint_position = (1.0 - self._last_gripper_position) * math.pi
+        message.position = [*telemetry.positions_rad, gripper_joint_position]
+        message.velocity = [*velocities, 0.0]
         self._joint_state_pub.publish(message)
         self._gripper_pub.publish(Float64(data=self._last_gripper_position))
 
