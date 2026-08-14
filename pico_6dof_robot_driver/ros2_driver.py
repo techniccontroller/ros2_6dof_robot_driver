@@ -47,6 +47,7 @@ class Pico6DOFDriver(Node):
         self._last_state_time = 0.0
         self._last_gripper_position = 0.0
         self._active_goal = None
+        self._position_command_count = 0
 
         state_group = MutuallyExclusiveCallbackGroup()
         command_group = ReentrantCallbackGroup()
@@ -106,6 +107,7 @@ class Pico6DOFDriver(Node):
         self.declare_parameter("joint_names", [f"joint_{index}" for index in range(1, 7)])
         self.declare_parameter("default_velocity", math.radians(10.0))
         self.declare_parameter("max_velocity", math.radians(30.0))
+        self.declare_parameter("debug_position_commands", True)
         self.declare_parameter("trajectory_goal_tolerance", 0.05)
         self.declare_parameter("trajectory_goal_time_tolerance", 2.0)
         self.declare_parameter("gripper_open_degrees", 10.0)
@@ -126,6 +128,7 @@ class Pico6DOFDriver(Node):
                 baudrate=int(self._param("baudrate")),
                 timeout=float(self._param("serial_timeout")),
                 protocol=FirmwareProtocol(),
+                line_callback=self._on_firmware_line,
             )
             robot.connect()
             try:
@@ -136,6 +139,14 @@ class Pico6DOFDriver(Node):
                 raise
             self._robot = robot
             self.get_logger().info(f"Connected to Pico robot on {robot.port} at {robot.baudrate} baud")
+
+    def _on_firmware_line(self, line: str) -> None:
+        """Expose firmware acknowledgments and diagnostics ignored as telemetry."""
+        lowered = line.lower()
+        if any(word in lowered for word in ("error", "invalid", "requires", "failed")):
+            self.get_logger().warning(f"Firmware RX: {line}")
+        elif bool(self._param("debug_position_commands")):
+            self.get_logger().info(f"Firmware RX: {line}")
 
     def _require_robot(self) -> SerialRobot:
         if self._robot is None or not self._robot.is_connected:
@@ -186,7 +197,16 @@ class Pico6DOFDriver(Node):
             return response
         return callback
 
-    def _send_positions(self, positions, velocity: float | None = None) -> None:
+    @staticmethod
+    def _format_degrees(positions) -> str:
+        return "[" + ", ".join(f"{math.degrees(value):.2f}" for value in positions) + "]"
+
+    def _send_positions(
+        self,
+        positions,
+        velocity: float | None = None,
+        source: str = "internal",
+    ) -> None:
         target = [float(value) for value in positions]
         if len(target) != JOINT_COUNT or not all(math.isfinite(value) for value in target):
             raise ValueError("joint command must contain six finite positions in radians")
@@ -198,13 +218,51 @@ class Pico6DOFDriver(Node):
         if not math.isfinite(speed) or speed <= 0.0:
             raise ValueError("command velocity and max_velocity must be finite and greater than zero")
         with self._command_lock:
-            self._require_robot().send_configuration(target, speed)
+            robot = self._require_robot()
+            firmware_command = robot.protocol.configuration_command(target, speed)
+            telemetry, received_at = robot.latest_telemetry()
+            state_detail = "no telemetry available"
+            if telemetry is not None:
+                max_error = max(
+                    abs(wanted - actual)
+                    for wanted, actual in zip(target, telemetry.positions_rad)
+                )
+                telemetry_age = time.monotonic() - received_at
+                state_detail = (
+                    f"telemetry_age={telemetry_age:.3f}s, "
+                    f"measured_degrees={self._format_degrees(telemetry.positions_rad)}, "
+                    f"max_target_delta={math.degrees(max_error):.2f}deg, "
+                    f"encoder_status={telemetry.raw.get('encoder_status', 'not reported')}"
+                )
+
+            if bool(self._param("debug_position_commands")):
+                self.get_logger().info(
+                    f"Sending position target from {source}: "
+                    f"degrees={self._format_degrees(target)}, "
+                    f"speed={math.degrees(speed):.2f}deg/s, {state_detail}"
+                )
+                self.get_logger().info(f"Serial TX: {firmware_command}")
+
+            robot.send(firmware_command)
+
+            if bool(self._param("debug_position_commands")):
+                self.get_logger().info(f"Serial write completed for position target from {source}")
 
     def _on_position_command(self, msg: Float64MultiArray) -> None:
+        self._position_command_count += 1
+        command_id = self._position_command_count
+        target = list(msg.data)
+        self.get_logger().info(
+            f"Received {POSITION_TOPIC} target #{command_id}: "
+            f"{len(target)} values, radians={target}"
+        )
         try:
-            self._send_positions(msg.data)
+            self._send_positions(target, source=f"{POSITION_TOPIC} target #{command_id}")
         except Exception as exc:
-            self.get_logger().error(f"Rejected {POSITION_TOPIC} command: {exc}")
+            self.get_logger().error(
+                f"Rejected {POSITION_TOPIC} target #{command_id}: "
+                f"{type(exc).__name__}: {exc}"
+            )
 
     def _gripper_norm_from_adapter(self, position_m: float) -> float:
         # Match the common Robotiq adapter convention: 0.0 m closed, 0.085 m open.
@@ -317,7 +375,7 @@ class Pico6DOFDriver(Node):
                     speed = float(self._param("default_velocity"))
                 else:
                     speed = max(abs(a - b) for a, b in zip(target, previous_positions)) / segment_time
-                self._send_positions(target, speed)
+                self._send_positions(target, speed, source="trajectory waypoint")
                 deadline = trajectory_start + target_time
                 while time.monotonic() < deadline:
                     if goal_handle.is_cancel_requested:

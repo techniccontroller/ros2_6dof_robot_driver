@@ -21,6 +21,16 @@ source install/setup.bash
 ros2 launch pico_6dof_robot_driver driver.launch.py serial_port:=/dev/ttyACM0
 ```
 
+To start the driver, robot model in RViz, and the example six-joint goal GUI:
+
+```bash
+ros2 launch pico_6dof_robot_driver driver_rviz.launch.py
+```
+
+Set the J1--J6 sliders in degrees and press **Send target** to publish the
+complete configuration to the driver. Disable either optional window with
+`launch_rviz:=false` or `launch_gui:=false`.
+
 The user running the node must have access to the serial device (commonly the
 `dialout` group on Linux). Set `auto_connect:=false` to start disconnected and
 then call `ros2 service call /connect std_srvs/srv/Trigger {}`.
@@ -61,6 +71,18 @@ Example direct command:
 ros2 topic pub --once /forward_position_controller/commands \
   std_msgs/msg/Float64MultiArray "{data: [0.0, -0.5, 0.2, 0.0, -1.0, 0.0]}"
 ```
+
+By default, each received position target is logged with a sequence number,
+values, selected velocity, latest telemetry age and target delta, exact
+firmware command, and serial-write completion. Set
+`debug_position_commands:=false` to suppress the detailed transmission logs;
+receipt and rejection messages remain enabled.
+
+With debugging enabled, non-telemetry firmware replies are shown as
+`Firmware RX`. A successful target is acknowledged by current firmware as
+`VEL_CONFIG is set`. The logged `encoder_status` should contain valid values
+for every encoder; the firmware disables joint control if any encoder is
+invalid.
 
 ## Firmware command buffer
 

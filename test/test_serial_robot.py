@@ -53,3 +53,28 @@ def test_reader_keeps_latest_telemetry_and_writer_terminates_lines():
     assert telemetry.positions_rad[1] == math.pi / 2
     assert ports[0].writes == [b"GRIP_OPEN\n"]
     assert not robot.is_connected
+
+
+def test_reader_forwards_non_telemetry_firmware_lines():
+    ports = []
+    received_lines = []
+
+    def factory(*args, **kwargs):
+        port = FakeSerial(*args, **kwargs)
+        ports.append(port)
+        return port
+
+    robot = SerialRobot(
+        "TEST",
+        timeout=0.01,
+        serial_factory=factory,
+        line_callback=received_lines.append,
+    )
+    robot.connect()
+    ports[0].lines.put(b"VEL_CONFIG is set\n")
+    deadline = time.monotonic() + 0.5
+    while not received_lines and time.monotonic() < deadline:
+        time.sleep(0.005)
+    robot.disconnect()
+
+    assert received_lines == ["VEL_CONFIG is set"]

@@ -11,10 +11,12 @@ def generate_launch_description():
     serial_port = LaunchConfiguration("serial_port")
     baudrate = LaunchConfiguration("baudrate")
     auto_connect = LaunchConfiguration("auto_connect")
+    debug_position_commands = LaunchConfiguration("debug_position_commands")
     return LaunchDescription([
         DeclareLaunchArgument("serial_port", default_value="/dev/ttyACM0"),
         DeclareLaunchArgument("baudrate", default_value="115200"),
         DeclareLaunchArgument("auto_connect", default_value="true"),
+        DeclareLaunchArgument("debug_position_commands", default_value="true"),
         Node(
             package="pico_6dof_robot_driver",
             executable="pico_6dof_driver",
@@ -27,6 +29,9 @@ def generate_launch_description():
                     "serial_port": serial_port,
                     "baudrate": ParameterValue(baudrate, value_type=int),
                     "auto_connect": ParameterValue(auto_connect, value_type=bool),
+                    "debug_position_commands": ParameterValue(
+                        debug_position_commands, value_type=bool
+                    ),
                 },
             ],
         ),

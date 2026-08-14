@@ -19,12 +19,14 @@ class SerialRobot:
         timeout: float = 0.05,
         protocol: FirmwareProtocol | None = None,
         serial_factory: Callable[..., object] | None = None,
+        line_callback: Callable[[str], None] | None = None,
     ) -> None:
         self.port = port
         self.baudrate = int(baudrate)
         self.timeout = float(timeout)
         self.protocol = protocol or FirmwareProtocol()
         self._serial_factory = serial_factory
+        self._line_callback = line_callback
         self._serial = None
         self._reader_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -112,6 +114,17 @@ class SerialRobot:
                     with self._state_lock:
                         self._latest = telemetry
                         self._latest_monotonic = time.monotonic()
+                elif self._line_callback is not None:
+                    if isinstance(line, bytes):
+                        text = line.decode("ascii", errors="replace").strip()
+                    else:
+                        text = str(line).strip()
+                    if text:
+                        try:
+                            self._line_callback(text)
+                        except Exception:
+                            # Diagnostics must never terminate serial reception.
+                            pass
             except Exception as exc:
                 if not self._stop_event.is_set():
                     self._last_error = exc

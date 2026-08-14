@@ -24,6 +24,7 @@ setup(
     entry_points={
         "console_scripts": [
             "pico_6dof_driver = pico_6dof_robot_driver.ros2_driver:main",
+            "pico_6dof_joint_goal_gui = pico_6dof_robot_driver.joint_goal_gui:main",
         ],
     },
 )
