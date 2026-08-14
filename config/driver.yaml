@@ -1,0 +1,12 @@
+pico_6dof_driver:
+  ros__parameters:
+    state_publish_rate: 30.0
+    state_timeout: 0.5
+    joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6]
+    default_velocity: 0.1745329252  # 10 deg/s, expressed in rad/s
+    max_velocity: 0.5235987756      # 30 deg/s
+    trajectory_goal_tolerance: 0.05
+    trajectory_goal_time_tolerance: 2.0
+    gripper_open_degrees: 10.0
+    gripper_close_degrees: 170.0
+    gripper_settle_time: 0.5
