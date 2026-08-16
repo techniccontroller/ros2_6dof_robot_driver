@@ -9,27 +9,97 @@ The ROS interface follows the supported joint/gripper subset of
 Cartesian pose, twist, impedance, and force/torque interfaces are deliberately
 not exposed because the Pico firmware has no kinematics or force/torque data.
 
-## Build and run
+## Getting started / usage
+
+This stack targets ROS 2 Humble and consists of these repositories:
+
+- [Pico firmware](https://github.com/techniccontroller/pico_6dof-robot_firmware)
+- [ROS 2 driver (this repository)](https://github.com/techniccontroller/ros2_6dof_robot_driver)
+- [Robot description](https://github.com/techniccontroller/ros2_6dof_robot_description)
+- [MoveIt configuration](https://github.com/techniccontroller/ros2_6dof_robot_moveit_config)
+
+Flash the firmware to the Pico, then clone the three ROS packages into one
+workspace and install their dependencies:
 
 ```bash
+source /opt/ros/humble/setup.bash
+mkdir -p ~/ros2_ws/src
 cd ~/ros2_ws/src
-git clone <this-repository-url> ros2_6dof-robot_driver
-python3 -m pip install pyserial
+git clone https://github.com/techniccontroller/ros2_6dof_robot_driver.git
+git clone https://github.com/techniccontroller/ros2_6dof_robot_description.git
+git clone https://github.com/techniccontroller/ros2_6dof_robot_moveit_config.git
 cd ..
-colcon build --packages-select pico_6dof_robot_driver
+rosdep install --from-paths src --ignore-src -r -y
+colcon build --packages-up-to ros2_6dof_robot_moveit_config
 source install/setup.bash
-ros2 launch pico_6dof_robot_driver driver.launch.py serial_port:=/dev/ttyACM0
 ```
 
-To start the driver, robot model in RViz, and the example six-joint goal GUI:
+First verify planning and execution with MoveIt's mock hardware:
+
+```bash
+ros2 launch ros2_6dof_robot_moveit_config demo.launch.py
+```
+
+To open the MoveIt interface and control the physical robot:
+
+```bash
+ros2 launch ros2_6dof_robot_moveit_config real_robot.launch.py \
+  serial_port:=/dev/ttyACM0
+```
+
+This single launch starts the driver, robot-control UI, robot state publisher,
+`move_group`, and two RViz windows: one state-only view and one MoveIt
+MotionPlanning view. Do not start `driver.launch.py` separately. In the
+MotionPlanning window, select the `manipulator` planning group, set a goal with
+the interactive marker, choose **Plan**, inspect the trajectory, and then
+choose **Execute**. The `gripper` group also provides the named states `open`
+and `close`.
+
+To run the driver, robot-control UI, and a state-only RViz view without MoveIt:
+
+```bash
+ros2 launch pico_6dof_robot_driver driver.launch.py \
+  serial_port:=/dev/ttyACM0
+```
+
+The older combined launch name remains available as an equivalent wrapper:
 
 ```bash
 ros2 launch pico_6dof_robot_driver driver_rviz.launch.py
 ```
 
-Set the J1--J6 sliders in degrees and press **Send target** to publish the
-complete configuration to the driver. Disable either optional window with
-`launch_rviz:=false` or `launch_gui:=false`.
+`driver.launch.py` always starts the Tkinter control UI and starts the basic
+RViz visualization by default. Use `launch_rviz:=false` when running headless.
+The MoveIt real-robot launch keeps this basic view and adds a second
+MotionPlanning RViz window. Tkinter is part of the standard Python/Linux
+desktop stack and adds no Python package dependency. The UI provides:
+
+- J1--J6 target sliders alongside live measured joint positions.
+- ROS 2 controls for connect/disconnect, hold, J1 homing, encoder-zero storage,
+  and the gripper.
+- Recording of the latest measured six-joint position, commanded gripper
+  state, and per-step delay.
+- Smooth, synchronized trajectory playback through the same
+  `FollowJointTrajectory` action used by MoveIt.
+- Reordering, replacing, and deleting recorded steps.
+- Saving and loading human-readable, versioned JSON sequence files.
+
+To teach a sequence, move the robot and gripper to a pose, enter how long it
+should hold after reaching that step, and press **Record measured position**.
+Repeat for the remaining poses and press **Execute sequence**. Each new step
+stores J1--J6 and the normalized gripper state (`0` open, `1` closed). Choose a
+trajectory speed in degrees/second before playback. The UI creates a dense,
+smooth trajectory from the current measured pose through every recorded pose;
+all six arm joints share the same interpolation progress and the recorded
+gripper command is sent at each nominal arrival time. **Stop playback + hold**
+cancels the trajectory and calls the driver's `stop` service. This is a
+convenience hold, not a safety-rated emergency stop.
+
+To run only the GUI after sourcing the workspace:
+
+```bash
+ros2 run pico_6dof_robot_driver pico_6dof_joint_goal_gui
+```
 
 The user running the node must have access to the serial device (commonly the
 `dialout` group on Linux). Set `auto_connect:=false` to start disconnected and
